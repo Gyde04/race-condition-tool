@@ -388,6 +388,7 @@
                 <div class="tab" onclick="switchTab('code')">Code Editor</div>
                 <div class="tab" onclick="switchTab('demo')">Live Demo</div>
                 <div class="tab" onclick="switchTab('url')">Scan URL</div>
+                <div class="tab" onclick="switchTab('website')">Scan Website</div>
                 <div class="tab" onclick="switchTab('examples')">Examples</div>
             </div>
 
@@ -494,6 +495,33 @@
                 <div class="url-results" id="urlResults" style="display: none;">
                     <div class="summary" id="urlSummary"></div>
                     <div class="conditions-list" id="urlConditionsList"></div>
+                </div>
+            </div>
+
+            <!-- Scan Website Tab -->
+            <div id="website" class="tab-content">
+                <h3>🌍 Scan Website for Race Conditions</h3>
+                <p>Enter a website domain (e.g., <code>example.com</code>) and optional path (e.g., <code>/static/app.js</code>) to scan a code file from that site.</p>
+                <div class="url-scan-controls">
+                    <input type="text" id="websiteDomainInput" class="url-input" placeholder="Enter website domain (e.g., example.com)">
+                    <input type="text" id="websitePathInput" class="url-input" placeholder="Optional path (e.g., /static/app.js)">
+                    <select class="language-select" id="websiteLanguageSelect">
+                        <option value="javascript">JavaScript</option>
+                        <option value="python">Python</option>
+                        <option value="typescript">TypeScript</option>
+                        <option value="java">Java</option>
+                        <option value="cpp">C++</option>
+                        <option value="c">C</option>
+                        <option value="go">Go</option>
+                        <option value="rust">Rust</option>
+                    </select>
+                    <button class="scan-btn" onclick="scanWebsite()" id="scanWebsiteBtn">
+                        🌍 Scan Website
+                    </button>
+                </div>
+                <div class="url-results" id="websiteResults" style="display: none;">
+                    <div class="summary" id="websiteSummary"></div>
+                    <div class="conditions-list" id="websiteConditionsList"></div>
                 </div>
             </div>
 
@@ -984,6 +1012,88 @@
             document.getElementById('urlResults').style.display = 'block';
             document.getElementById('urlSummary').innerHTML = `<div class="error"><strong>❌ Error:</strong> ${message}</div>`;
             document.getElementById('urlConditionsList').innerHTML = '';
+        }
+
+        // Scan Website Functions
+        async function scanWebsite() {
+            const domain = document.getElementById('websiteDomainInput').value;
+            const path = document.getElementById('websitePathInput').value;
+            const language = document.getElementById('websiteLanguageSelect').value;
+            if (!domain.trim()) {
+                showWebsiteError('Please enter a website domain to scan');
+                return;
+            }
+            showWebsiteLoading();
+            try {
+                const response = await fetch('/api/scan-website', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        domain: domain,
+                        path: path,
+                        language: language
+                    })
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    displayWebsiteResults(result);
+                } else {
+                    showWebsiteError(result.error || 'Scan failed');
+                }
+            } catch (error) {
+                showWebsiteError('Network error: ' + error.message);
+            }
+        }
+        function displayWebsiteResults(data) {
+            const summary = document.getElementById('websiteSummary');
+            const conditionsList = document.getElementById('websiteConditionsList');
+            let html = `<h3>📊 Scan Summary</h3>`;
+            html += `<div class="summary-stats">
+                <div class="stat"><div class="stat-number">${data.summary.total_conditions}</div><div class="stat-label">Total Issues</div></div>
+                <div class="stat"><div class="stat-number">${data.summary.high_severity}</div><div class="stat-label">High Severity</div></div>
+                <div class="stat"><div class="stat-number">${data.summary.medium_severity}</div><div class="stat-label">Medium Severity</div></div>
+                <div class="stat"><div class="stat-number">${data.summary.low_severity}</div><div class="stat-label">Low Severity</div></div>
+            </div>`;
+            if (data.website_info) {
+                html += `<p><strong>Domain:</strong> ${data.website_info.domain}</p>`;
+                html += `<p><strong>Path:</strong> ${data.website_info.path || '/'} | <strong>URL:</strong> <a href="${data.website_info.url}" target="_blank">${data.website_info.url}</a></p>`;
+                html += `<p><strong>Language:</strong> ${data.website_info.language}</p>`;
+                html += `<p><strong>Lines:</strong> ${data.website_info.lines} | <strong>Size:</strong> ${data.website_info.size} bytes</p>`;
+            }
+            summary.innerHTML = html;
+            if (data.conditions.length === 0) {
+                conditionsList.innerHTML = `<div class="condition"><h4>✅ No Race Conditions Found</h4><p>No potential race conditions detected in the code from this website.</p></div>`;
+            } else {
+                conditionsList.innerHTML = data.conditions.map((condition, index) => `
+                    <div class="condition">
+                        <div class="condition-header">
+                            <span class="condition-type">${condition.race_type}</span>
+                            <span class="severity ${condition.severity.toLowerCase()}">${condition.severity}</span>
+                        </div>
+                        <div class="condition-description">${condition.description}</div>
+                        <div class="code-snippet">${condition.code_snippet}</div>
+                        <div class="recommendations">
+                            <h4>💡 Recommendations:</h4>
+                            <ul>
+                                ${condition.recommendations.map(rec => `<li>${rec}</li>`).join('')}
+                            </ul>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            document.getElementById('websiteResults').style.display = 'block';
+        }
+        function showWebsiteLoading() {
+            document.getElementById('websiteResults').style.display = 'block';
+            document.getElementById('websiteSummary').innerHTML = `<div class="loading"><div class="spinner"></div><p>Fetching and scanning code from website...</p></div>`;
+            document.getElementById('websiteConditionsList').innerHTML = '';
+        }
+        function showWebsiteError(message) {
+            document.getElementById('websiteResults').style.display = 'block';
+            document.getElementById('websiteSummary').innerHTML = `<div class="error"><strong>❌ Error:</strong> ${message}</div>`;
+            document.getElementById('websiteConditionsList').innerHTML = '';
         }
 
         // Initialize

@@ -14,6 +14,7 @@ import time
 from werkzeug.utils import secure_filename
 from race_condition_detector import RaceConditionDetector
 import io
+import requests
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -106,6 +107,139 @@ def scan_text():
             
             # Add content info to report
             report_data['content_info'] = {
+                'language': language,
+                'size': len(content),
+                'lines': len(content.split('\n'))
+            }
+            
+            return jsonify(report_data)
+            
+        finally:
+            # Clean up temporary file
+            os.unlink(temp_file_path)
+    
+    except Exception as e:
+        return jsonify({'error': f'Scan failed: {str(e)}'}), 500
+
+@app.route('/api/scan-url', methods=['POST'])
+def scan_url():
+    """API endpoint to scan code from a URL for race conditions."""
+    try:
+        data = request.get_json()
+        if not data or 'url' not in data:
+            return jsonify({'error': 'No URL provided'}), 400
+        
+        url = data['url']
+        language = data.get('language', 'python')
+        
+        # Fetch the content from the URL
+        try:
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            content = resp.text
+        except Exception as e:
+            return jsonify({'error': f'Failed to fetch URL: {str(e)}'}), 400
+        
+        # Create temporary file with appropriate extension
+        extension = {
+            'python': '.py',
+            'javascript': '.js',
+            'typescript': '.ts',
+            'java': '.java',
+            'cpp': '.cpp',
+            'c': '.c',
+            'go': '.go',
+            'rust': '.rs'
+        }.get(language, '.py')
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix=extension, delete=False) as temp_file:
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+        
+        try:
+            # Scan the file
+            conditions = detector.scan_file(temp_file_path)
+            
+            # Generate report
+            report = detector.generate_report(conditions, 'json')
+            report_data = json.loads(report)
+            
+            # Add URL info to report
+            report_data['url_info'] = {
+                'url': url,
+                'language': language,
+                'size': len(content),
+                'lines': len(content.split('\n'))
+            }
+            
+            return jsonify(report_data)
+            
+        finally:
+            # Clean up temporary file
+            os.unlink(temp_file_path)
+    
+    except Exception as e:
+        return jsonify({'error': f'Scan failed: {str(e)}'}), 500
+
+@app.route('/api/scan-website', methods=['POST'])
+def scan_website():
+    """API endpoint to scan code from a website domain and optional path for race conditions."""
+    try:
+        data = request.get_json()
+        if not data or 'domain' not in data:
+            return jsonify({'error': 'No domain provided'}), 400
+        
+        domain = data['domain'].strip()
+        path = data.get('path', '').strip()
+        language = data.get('language', 'javascript')
+        
+        # Build the full URL
+        if not domain.startswith('http://') and not domain.startswith('https://'):
+            url = 'https://' + domain
+        else:
+            url = domain
+        if path:
+            if not path.startswith('/'):
+                path = '/' + path
+            url += path
+        
+        # Fetch the content from the URL
+        try:
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            content = resp.text
+        except Exception as e:
+            return jsonify({'error': f'Failed to fetch URL: {url} - {str(e)}'}), 400
+        
+        # Create temporary file with appropriate extension
+        extension = {
+            'python': '.py',
+            'javascript': '.js',
+            'typescript': '.ts',
+            'java': '.java',
+            'cpp': '.cpp',
+            'c': '.c',
+            'go': '.go',
+            'rust': '.rs'
+        }.get(language, '.js')
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix=extension, delete=False) as temp_file:
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+        
+        try:
+            # Scan the file
+            conditions = detector.scan_file(temp_file_path)
+            
+            # Generate report
+            report = detector.generate_report(conditions, 'json')
+            report_data = json.loads(report)
+            
+            # Add website info to report
+            report_data['website_info'] = {
+                'domain': domain,
+                'path': path,
+                'url': url,
                 'language': language,
                 'size': len(content),
                 'lines': len(content.split('\n'))
