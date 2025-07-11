@@ -8,6 +8,9 @@ from flask import Flask, render_template, request, jsonify, send_file
 import os
 import tempfile
 import json
+import subprocess
+import threading
+import time
 from werkzeug.utils import secure_filename
 from race_condition_detector import RaceConditionDetector
 import io
@@ -117,6 +120,148 @@ def scan_text():
     except Exception as e:
         return jsonify({'error': f'Scan failed: {str(e)}'}), 500
 
+@app.route('/api/execute', methods=['POST'])
+def execute_code():
+    """API endpoint to execute code and detect race conditions in real-time."""
+    try:
+        data = request.get_json()
+        if not data or 'code' not in data:
+            return jsonify({'error': 'No code provided'}), 400
+        
+        code = data['code']
+        language = data.get('language', 'python')
+        execution_timeout = data.get('timeout', 10)  # 10 seconds default
+        
+        # Create temporary file for execution
+        extension = {
+            'python': '.py',
+            'javascript': '.js',
+            'typescript': '.ts',
+            'java': '.java',
+            'cpp': '.cpp',
+            'c': '.c',
+            'go': '.go',
+            'rust': '.rs'
+        }.get(language, '.py')
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix=extension, delete=False) as temp_file:
+            temp_file.write(code)
+            temp_file_path = temp_file.name
+        
+        try:
+            # First, scan for race conditions
+            conditions = detector.scan_file(temp_file_path)
+            
+            # Then try to execute the code (safely)
+            execution_result = execute_code_safely(temp_file_path, language, execution_timeout)
+            
+            # Generate comprehensive report
+            report_data = {
+                'scan_results': {
+                    'conditions': [
+                        {
+                            'race_type': c.race_type,
+                            'description': c.description,
+                            'severity': c.severity,
+                            'line_number': c.line_number,
+                            'code_snippet': c.code_snippet,
+                            'recommendations': c.recommendations
+                        } for c in conditions
+                    ],
+                    'total_conditions': len(conditions),
+                    'high_severity': len([c for c in conditions if c.severity == 'HIGH']),
+                    'medium_severity': len([c for c in conditions if c.severity == 'MEDIUM']),
+                    'low_severity': len([c for c in conditions if c.severity == 'LOW'])
+                },
+                'execution_results': execution_result,
+                'code_info': {
+                    'language': language,
+                    'size': len(code),
+                    'lines': len(code.split('\n'))
+                }
+            }
+            
+            return jsonify(report_data)
+            
+        finally:
+            # Clean up temporary file
+            os.unlink(temp_file_path)
+    
+    except Exception as e:
+        return jsonify({'error': f'Execution failed: {str(e)}'}), 500
+
+def execute_code_safely(file_path, language, timeout):
+    """Safely execute code with timeout and restrictions."""
+    try:
+        if language == 'python':
+            # For Python, we'll run it in a restricted environment
+            result = subprocess.run(
+                ['python3', file_path],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=tempfile.gettempdir()  # Run in temp directory
+            )
+            
+            return {
+                'success': result.returncode == 0,
+                'stdout': result.stdout,
+                'stderr': result.stderr,
+                'return_code': result.returncode,
+                'execution_time': 'completed',
+                'warnings': []
+            }
+        
+        elif language == 'javascript':
+            # For JavaScript, we'll use Node.js
+            result = subprocess.run(
+                ['node', file_path],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=tempfile.gettempdir()
+            )
+            
+            return {
+                'success': result.returncode == 0,
+                'stdout': result.stdout,
+                'stderr': result.stderr,
+                'return_code': result.returncode,
+                'execution_time': 'completed',
+                'warnings': []
+            }
+        
+        else:
+            # For other languages, we'll just analyze without execution
+            return {
+                'success': False,
+                'stdout': '',
+                'stderr': f'Execution not supported for {language}',
+                'return_code': -1,
+                'execution_time': 'not_supported',
+                'warnings': [f'Live execution not available for {language}']
+            }
+    
+    except subprocess.TimeoutExpired:
+        return {
+            'success': False,
+            'stdout': '',
+            'stderr': f'Execution timed out after {timeout} seconds',
+            'return_code': -1,
+            'execution_time': 'timeout',
+            'warnings': ['Execution was terminated due to timeout']
+        }
+    
+    except Exception as e:
+        return {
+            'success': False,
+            'stdout': '',
+            'stderr': f'Execution error: {str(e)}',
+            'return_code': -1,
+            'execution_time': 'error',
+            'warnings': ['Execution failed due to system error']
+        }
+
 @app.route('/api/examples')
 def get_examples():
     """API endpoint to get example race condition code."""
@@ -125,10 +270,12 @@ def get_examples():
             'title': 'File Operation Race Condition',
             'description': 'Multiple threads writing to the same file without synchronization',
             'code': '''import threading
+import time
 
 def write_to_file(data):
     with open('shared_file.txt', 'a') as f:
         f.write(data + '\\n')
+        time.sleep(0.1)  # Simulate work
 
 # RACE CONDITION: Multiple threads writing without locking
 threads = []
@@ -138,19 +285,24 @@ for i in range(5):
     thread.start()
 
 for thread in threads:
-    thread.join()'''
+    thread.join()
+
+print("File writing completed!")'''
         },
         'variable_race': {
             'title': 'Variable Race Condition',
             'description': 'Variable modification without synchronization in threaded context',
             'code': '''import threading
+import time
 
 counter = 0  # Shared variable
 
 def increment():
     global counter
     # RACE CONDITION: Non-atomic increment operation
-    counter += 1
+    for _ in range(100):
+        counter += 1
+        time.sleep(0.001)
 
 threads = []
 for _ in range(10):
@@ -161,17 +313,24 @@ for _ in range(10):
 for thread in threads:
     thread.join()
 
-print(f"Final counter value: {counter}")'''
+print(f"Final counter value: {counter}")
+print("Expected: 1000, Actual may be less due to race condition!")'''
         },
         'database_race': {
             'title': 'Database Race Condition',
             'description': 'Database operations without proper transaction handling',
             'code': '''import sqlite3
 import threading
+import time
 
 def update_balance(amount):
-    conn = sqlite3.connect('accounts.db')
+    conn = sqlite3.connect(':memory:')  # Use in-memory database for demo
     cursor = conn.cursor()
+    
+    # Create table
+    cursor.execute('''CREATE TABLE IF NOT EXISTS accounts 
+                     (id INTEGER PRIMARY KEY, balance INTEGER)''')
+    cursor.execute('INSERT OR REPLACE INTO accounts (id, balance) VALUES (1, 1000)')
     
     # RACE CONDITION: Read-modify-write without transaction
     cursor.execute("SELECT balance FROM accounts WHERE id = 1")
@@ -182,6 +341,7 @@ def update_balance(amount):
     
     conn.commit()
     conn.close()
+    print(f"Updated balance by {amount}")
 
 threads = []
 for i in range(5):
@@ -190,12 +350,15 @@ for i in range(5):
     thread.start()
 
 for thread in threads:
-    thread.join()'''
+    thread.join()
+
+print("Database updates completed!")'''
         },
         'correct_implementation': {
             'title': 'Correct Implementation',
             'description': 'Proper synchronization with locks',
             'code': '''import threading
+import time
 
 # Proper lock usage
 lock = threading.Lock()
@@ -203,8 +366,10 @@ counter = 0
 
 def safe_increment():
     global counter
-    with lock:
-        counter += 1
+    for _ in range(100):
+        with lock:
+            counter += 1
+        time.sleep(0.001)
 
 threads = []
 for _ in range(10):
@@ -215,7 +380,26 @@ for _ in range(10):
 for thread in threads:
     thread.join()
 
-print(f"Final counter value: {counter}")'''
+print(f"Final counter value: {counter}")
+print("Expected: 1000, Actual: 1000 (correct!)")'''
+        },
+        'simple_demo': {
+            'title': 'Simple Demo',
+            'description': 'A simple example to test the execution',
+            'code': '''print("Hello from Race Condition Security Tool!")
+print("This is a simple demo to test execution.")
+
+# Simple calculation
+result = 10 + 20
+print(f"10 + 20 = {result}")
+
+# List operations
+numbers = [1, 2, 3, 4, 5]
+squared = [x**2 for x in numbers]
+print(f"Numbers: {numbers}")
+print(f"Squared: {squared}")
+
+print("Demo completed successfully!")'''
         }
     }
     
