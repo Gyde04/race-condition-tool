@@ -16,6 +16,10 @@ from race_condition_detector import RaceConditionDetector
 import io
 import requests
 
+BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
@@ -134,7 +138,7 @@ def scan_url():
         
         # Fetch the content from the URL
         try:
-            resp = requests.get(url, timeout=10)
+            resp = requests.get(url, timeout=10, headers=BROWSER_HEADERS)
             resp.raise_for_status()
             content = resp.text
         except Exception as e:
@@ -205,7 +209,7 @@ def scan_website():
         
         # Fetch the content from the URL
         try:
-            resp = requests.get(url, timeout=10)
+            resp = requests.get(url, timeout=10, headers=BROWSER_HEADERS)
             resp.raise_for_status()
             content = resp.text
         except Exception as e:
