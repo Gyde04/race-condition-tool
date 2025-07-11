@@ -1,0 +1,15 @@
+# Race Condition Security Tool Requirements
+
+# Web application dependencies
+Flask==2.3.3
+Werkzeug==2.3.7
+
+# Standard library modules (no installation needed)
+# ast      # Standard library
+# re       # Standard library
+# json     # Standard library
+# threading # Standard library
+# pathlib  # Standard library
+# logging  # Standard library
+# tempfile # Standard library
+# os       # Standard library 
