@@ -319,7 +319,7 @@ print("Expected: 1000, Actual may be less due to race condition!")'''
         'database_race': {
             'title': 'Database Race Condition',
             'description': 'Database operations without proper transaction handling',
-            'code': '''import sqlite3
+            'code': """import sqlite3
 import threading
 import time
 
@@ -333,15 +333,15 @@ def update_balance(amount):
     cursor.execute('INSERT OR REPLACE INTO accounts (id, balance) VALUES (1, 1000)')
     
     # RACE CONDITION: Read-modify-write without transaction
-    cursor.execute("SELECT balance FROM accounts WHERE id = 1")
+    cursor.execute(\"SELECT balance FROM accounts WHERE id = 1\")
     balance = cursor.fetchone()[0]
     
     new_balance = balance + amount
-    cursor.execute("UPDATE accounts SET balance = ? WHERE id = 1", (new_balance,))
+    cursor.execute(\"UPDATE accounts SET balance = ? WHERE id = 1\", (new_balance,))
     
     conn.commit()
     conn.close()
-    print(f"Updated balance by {amount}")
+    print(f\"Updated balance by {amount}\")
 
 threads = []
 for i in range(5):
@@ -352,7 +352,7 @@ for i in range(5):
 for thread in threads:
     thread.join()
 
-print("Database updates completed!")'''
+print(\"Database updates completed!\")"""
         },
         'correct_implementation': {
             'title': 'Correct Implementation',
